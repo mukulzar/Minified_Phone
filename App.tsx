@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Alert,
   AppState,
@@ -43,14 +43,15 @@ const initialBlocks = ['Instagram', 'YouTube', 'TikTok'];
 const green = '#91b69a';
 type LauncherApp = { name: string; packageName: string };
 const launcherModule = NativeModules.MindlessLauncher as {
-  getApps: () => Promise<LauncherApp[]>;
+  getApps?: () => Promise<LauncherApp[]>;
   launchApp: (packageName: string) => Promise<boolean>;
   openHomeSettings: () => Promise<void>;
-  isDefaultHome: () => Promise<boolean>;
-  getSetupComplete: () => Promise<boolean>;
-  completeSetup: () => Promise<void>;
-  getFavorites: () => Promise<string[] | null>;
-  saveFavorites: (favorites: string[]) => Promise<void>;
+  isDefaultHome?: () => Promise<boolean>;
+  getSetupComplete?: () => Promise<boolean>;
+  completeSetup?: () => Promise<void>;
+  setBlackWallpaper?: () => Promise<void>;
+  getFavorites?: () => Promise<string[] | null>;
+  saveFavorites?: (favorites: string[]) => Promise<void>;
 } | undefined;
 
 function App() {
@@ -67,26 +68,47 @@ function App() {
   const [installedApps, setInstalledApps] = useState<LauncherApp[]>(appNames.map(name => ({ name, packageName: '' })));
   const [setupError, setSetupError] = useState('');
   const [setupLoaded, setSetupLoaded] = useState(Platform.OS !== 'android' || !launcherModule);
+  const setupCompletionInProgress = useRef(false);
 
   useEffect(() => {
     if (Platform.OS !== 'android' || !launcherModule) return;
     Promise.all([
-      launcherModule.getApps().catch(() => {
+      (launcherModule.getApps?.() ?? Promise.resolve([])).catch(() => {
         setSetupError('Could not load installed apps. You can still use the default app list.');
         return [];
       }),
-      launcherModule.getSetupComplete(),
-      launcherModule.getFavorites(),
+      launcherModule.getSetupComplete?.() ?? Promise.resolve(false),
+      launcherModule.getFavorites?.() ?? Promise.resolve(null),
+      launcherModule.isDefaultHome?.() ?? Promise.resolve(false),
     ])
-      .then(([apps, setupComplete, savedFavorites]) => {
+      .then(async ([apps, setupComplete, savedFavorites, isDefaultHome]) => {
+        let currentFavorites = savedFavorites;
         if (apps.length > 0) {
           setInstalledApps(apps);
-          if (savedFavorites === null) {
-            setFavorites(initialFavorites.filter(name => apps.some(app => app.name === name)));
+          if (currentFavorites === null) {
+            currentFavorites = initialFavorites.filter(name => apps.some(app => app.name === name));
           }
         }
-        if (savedFavorites !== null) setFavorites(savedFavorites);
-        if (setupComplete) setPage('home');
+        if (currentFavorites !== null) {
+          setFavorites(currentFavorites);
+          if (savedFavorites === null) await launcherModule.saveFavorites?.(currentFavorites);
+        }
+        if (isDefaultHome) {
+          if (!launcherModule.setBlackWallpaper || (!setupComplete && !launcherModule.completeSetup)) {
+            setSetupError('Update or reinstall Minified Phone to apply the black wallpaper.');
+            setPage('defaultHome');
+            return;
+          }
+          try {
+            await launcherModule.setBlackWallpaper();
+          } catch {
+            setSetupError('Could not set the black wallpaper. Please try again.');
+            setPage('defaultHome');
+            return;
+          }
+          if (!setupComplete) await launcherModule.completeSetup?.();
+        }
+        if (setupComplete || isDefaultHome) setPage('home');
       })
       .catch(() => setSetupError('Could not load your setup. Please reopen the app to try again.'))
       .finally(() => setSetupLoaded(true));
@@ -94,8 +116,15 @@ function App() {
 
   const finishSetupIfDefault = async () => {
     if (!launcherModule) return;
+    if (setupCompletionInProgress.current) return;
+    if (!launcherModule.isDefaultHome || !launcherModule.setBlackWallpaper || !launcherModule.completeSetup) {
+      setSetupError('Update or reinstall Minified Phone to finish setup and apply the black wallpaper.');
+      return;
+    }
+    setupCompletionInProgress.current = true;
     try {
       if (await launcherModule.isDefaultHome()) {
+        await launcherModule.setBlackWallpaper();
         await launcherModule.completeSetup();
         setSetupError('');
         setPage('home');
@@ -103,7 +132,9 @@ function App() {
         setSetupError('Choose Minified Phone in Android home app settings, then check again.');
       }
     } catch {
-      setSetupError('Could not verify the default home app. Please try again.');
+      setSetupError('Could not set the black wallpaper. Please try again.');
+    } finally {
+      setupCompletionInProgress.current = false;
     }
   };
 
@@ -181,7 +212,7 @@ function App() {
       ? favorites.filter(item => item !== name)
       : [...favorites, name];
     setFavorites(updatedFavorites);
-    if (Platform.OS === 'android' && launcherModule) {
+    if (Platform.OS === 'android' && launcherModule?.saveFavorites) {
       launcherModule.saveFavorites(updatedFavorites).catch(() => {
         setSetupError('Could not save your favorite apps. Please try again.');
       });

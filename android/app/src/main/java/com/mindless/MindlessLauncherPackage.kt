@@ -1,5 +1,8 @@
 package com.mindless
 
+import android.app.WallpaperManager
+import android.graphics.Bitmap
+import android.graphics.Color
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -41,6 +44,28 @@ class MindlessLauncherModule(context: ReactApplicationContext) : ReactContextBas
   }
 
   @ReactMethod
+  fun setBlackWallpaper(promise: Promise) {
+    try {
+      if (preferences.getBoolean("black_wallpaper_set", false)) {
+        promise.resolve(null)
+        return
+      }
+      val bitmap = Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
+      bitmap.eraseColor(Color.BLACK)
+      try {
+        WallpaperManager.getInstance(reactApplicationContext)
+          .setBitmap(bitmap, null, true, WallpaperManager.FLAG_SYSTEM)
+      } finally {
+        bitmap.recycle()
+      }
+      preferences.edit().putBoolean("black_wallpaper_set", true).apply()
+      promise.resolve(null)
+    } catch (error: Exception) {
+      promise.reject("BLACK_WALLPAPER_FAILED", error)
+    }
+  }
+
+  @ReactMethod
   fun getFavorites(promise: Promise) {
     try {
       if (!preferences.contains("favorites")) {
@@ -76,7 +101,9 @@ class MindlessLauncherModule(context: ReactApplicationContext) : ReactContextBas
   @ReactMethod
   fun isDefaultHome(promise: Promise) {
     try {
-      val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+      val intent = Intent(Intent.ACTION_MAIN)
+        .addCategory(Intent.CATEGORY_HOME)
+        .addCategory(Intent.CATEGORY_DEFAULT)
       val homePackage = reactApplicationContext.packageManager
         .resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)
         ?.activityInfo
