@@ -117,9 +117,12 @@ class MindlessLauncherModule(context: ReactApplicationContext) : ReactContextBas
   @ReactMethod
   fun openHomeSettings(promise: Promise) {
     try {
-      val intent = Intent(Settings.ACTION_HOME_SETTINGS)
-        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-      reactApplicationContext.startActivity(intent)
+      val activity = reactApplicationContext.currentActivity
+      if (activity == null) {
+        promise.reject("HOME_SETTINGS_FAILED", "Launcher activity is not available")
+        return
+      }
+      activity.startActivity(Intent(Settings.ACTION_HOME_SETTINGS))
       promise.resolve(null)
     } catch (error: Exception) {
       promise.reject("HOME_SETTINGS_FAILED", error)

@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">Minified Phone</string>
+    <string name="lock_accessibility_service_description">Allows Minified Phone to lock the screen when double-tap-to-lock is enabled.</string>
 </resources>
